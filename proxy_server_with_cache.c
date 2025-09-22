@@ -33,6 +33,7 @@ struct arc_cache
     int time; // last accessed time (global_time)
     int freq;
     double score;
+    int elapsed_time; // Store original fetch time
     struct arc_cache *next;
 };
 
@@ -105,7 +106,12 @@ void add_cache_element(char *data, int size, char *url, int elapsed_time)
             curr->freq++;
             int time_diff = global_time - curr->time;
             curr->time = global_time;
+            curr->elapsed_time = elapsed_time; // Store new fetch time
+            // Consistent formula: freq - recency_penalty + fetch_value
             curr->score = a * curr->freq - b * time_diff + c * elapsed_time;
+
+            printf("[DEBUG] Updated cache entry: %s (Score: %.2f, Fetch time: %dms)\n", 
+                   url, curr->score, elapsed_time);
 
             pthread_mutex_unlock(&lock);
             return;
@@ -128,10 +134,15 @@ void add_cache_element(char *data, int size, char *url, int elapsed_time)
     new_node->size = size;
     new_node->time = global_time;
     new_node->freq = 1;
-    new_node->score = a * new_node->freq - b * new_node->time + c * elapsed_time; // time_diff is zero at creation
+    new_node->elapsed_time = elapsed_time; // Store fetch time
+    // New entry: base frequency + fetch value (no time penalty yet)
+    new_node->score = a * new_node->freq + c * elapsed_time;
     new_node->next = head;
     head = new_node;
     cache_size++;
+
+    printf("[DEBUG] Added new cache entry: %s (Score: %.2f, Fetch time: %dms)\n", 
+           url, new_node->score, elapsed_time);
 
     pthread_mutex_unlock(&lock);
 }
@@ -151,9 +162,10 @@ struct arc_cache *find(char *url)
             temp->time = global_time;
 
             int time_diff = global_time - old_time;
-            temp->score = a * temp->freq + b * time_diff;
+            // NOW includes elapsed_time consistently with add_cache_element
+            temp->score = a * temp->freq - b * time_diff + c * temp->elapsed_time;
 
-            printf("[DEBUG] Cache hit for URL: %s\n", url);
+            printf("[DEBUG] Cache hit for URL: %s (Updated score: %.2f)\n", url, temp->score);
 
             pthread_mutex_unlock(&lock);
             return temp;
@@ -167,19 +179,19 @@ struct arc_cache *find(char *url)
 void print_cache()
 {
     printf("\n-------------------- Cache Contents --------------------\n");
-    printf("%-40s %-8s %-14s %-8s %-10s %-6s\n",
-           "URL", "Size", "Last Accessed", "Freq", "Score", "Age");
-    printf("---------------------------------------------------------\n");
+    printf("%-40s %-8s %-14s %-8s %-10s %-10s %-6s\n",
+           "URL", "Size", "Last Accessed", "Freq", "Score", "Fetch(ms)", "Age");
+    printf("------------------------------------------------------------------------\n");
 
     struct arc_cache *curr = head;
     while (curr)
     {
         int age = global_time - curr->time;
-        printf("%-40s %-8d %-14d %-8d %-10.2f %-6d\n",
-               curr->url, curr->size, curr->time, curr->freq, curr->score, age);
+        printf("%-40s %-8d %-14d %-8d %-10.2f %-10d %-6d\n",
+               curr->url, curr->size, curr->time, curr->freq, curr->score, curr->elapsed_time, age);
         curr = curr->next;
     }
-    printf("---------------------------------------------------------\n\n");
+    printf("------------------------------------------------------------------------\n\n");
 }
 
 
